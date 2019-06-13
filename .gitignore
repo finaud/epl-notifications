@@ -1,5 +1,7 @@
 __pycache__/
 venv/
 .idea/
+.DS_Store
 
 config.py
+firebase-admin-key.json

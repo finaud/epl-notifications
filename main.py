@@ -1,9 +1,19 @@
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 from flask import Flask, request, abort, render_template
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
+from google.cloud.firestore_v1 import ArrayUnion
 import re
 
 import config
+
+cred = credentials.Certificate(config.service_account)
+firebase_admin.initialize_app(cred)
+
+db = firestore.client()
+doc_ref = db.collection('users').document('telephones')
 
 client = Client(config.account, config.token)
 twilio_number = config.number
@@ -12,7 +22,10 @@ app = Flask(__name__)
 
 
 def send_sms(to: str, body: str) -> None:
-    client.messages.create(to=to, from_=twilio_number, body=body)
+    try:
+        client.messages.create(to=to, from_=twilio_number, body=body)
+    except TwilioRestException as e:
+        print("failed to send")
 
 
 def is_valid_number(number: str) -> bool:
@@ -32,7 +45,7 @@ def index():
         number = re.sub("\D", "", request.form['telephone'])
         if is_valid_number(number):
             pass
-            # 1. add number to db
+            doc_ref.update({'numbers': ArrayUnion(["+" + number])})
             send_sms("+" + number, "Thank you for signing up for EPL game notifications!")
             return render_template('registered.html')
 
@@ -41,9 +54,9 @@ def index():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    number = ""
-
     if request.method == 'POST':
+        numbers = doc_ref.get().to_dict()['numbers']
+
         response = request.json
         if 'matches_count' in response and response['matches_count'] > 0:
             for match in response['results']:
@@ -51,7 +64,8 @@ def webhook():
                                                         match['away_team']['team_name'],
                                                         match['start_datetime']['datetime'])
 
-                send_sms(number, text_body)
+                for number in numbers:
+                    send_sms(number, text_body)
         return '', 200
 
     else:
